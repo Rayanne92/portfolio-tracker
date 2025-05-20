@@ -4,15 +4,28 @@ import requests
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from datetime import datetime
+import json
+import os
 
 # === CONFIGURATION ===
 API_KEY = "UUW46YCUQOF188ZW"
 BASE_URL = "https://www.alphavantage.co/query"
+PORTFOLIO_FILE = "portfolio.json"
 
-# === PORTEFEUILLE LOCAL
+# === PORTFOLIO (chargement depuis fichier si dispo)
 portfolio = {}
 
-# === RÉCUPÉRER HISTORIQUE DE PRIX
+def load_portfolio():
+    global portfolio
+    if os.path.exists(PORTFOLIO_FILE):
+        with open(PORTFOLIO_FILE, "r") as f:
+            portfolio = json.load(f)
+
+def save_portfolio():
+    with open(PORTFOLIO_FILE, "w") as f:
+        json.dump(portfolio, f, indent=2)
+
+# === FONCTION: HISTORIQUE DES PRIX
 def fetch_price_history(symbol):
     try:
         params = {
@@ -39,7 +52,7 @@ def fetch_price_history(symbol):
         messagebox.showerror("Erreur", str(e))
         return [], []
 
-# === DERNIER PRIX D'UN ACTIF
+# === FONCTION: DERNIER PRIX
 def fetch_last_price(symbol):
     try:
         params = {
@@ -53,23 +66,24 @@ def fetch_last_price(symbol):
     except:
         return 0.0
 
-# === INTERFACE UTILISATEUR
+# === INTERFACE
 def start_ui():
+    load_portfolio()
     root = tk.Tk()
     root.title("Suivi de portefeuille")
     root.geometry("1000x700")
     root.configure(bg="#f0f0f0")
 
-    # === ZONE DE SAISIE
+    # === CHAMPS D'ENTRÉE
     input_frame = tk.Frame(root, bg="#f0f0f0")
     input_frame.pack(pady=10)
 
     tk.Label(input_frame, text="Symbole :", bg="#f0f0f0").grid(row=0, column=0)
-    symbol_entry = tk.Entry(input_frame)
+    symbol_entry = tk.Entry(input_frame, width=10)
     symbol_entry.grid(row=0, column=1, padx=5)
 
     tk.Label(input_frame, text="Quantité :", bg="#f0f0f0").grid(row=0, column=2)
-    qty_entry = tk.Entry(input_frame)
+    qty_entry = tk.Entry(input_frame, width=10)
     qty_entry.grid(row=0, column=3, padx=5)
 
     def add_asset():
@@ -92,18 +106,19 @@ def start_ui():
             "last_price": last_price
         }
 
+        save_portfolio()
         update_symbol_list()
         update_portfolio_table()
 
-    tk.Button(input_frame, text="Ajouter au portefeuille", command=add_asset, bg="#007BFF", fg="white").grid(row=0, column=4, padx=10)
+    tk.Button(input_frame, text="Ajouter", command=add_asset, bg="#28a745", fg="white").grid(row=0, column=4, padx=10)
 
-    # === SÉLECTEUR D'ACTIF
+    # === SÉLECTEUR DE SYMBOLE
     selected_symbol = tk.StringVar()
     symbol_menu = ttk.Combobox(root, textvariable=selected_symbol, state="readonly", values=[])
     symbol_menu.pack(pady=5)
 
-    # === GRAPHIQUE PRIX (réduit)
-    fig, ax = plt.subplots(figsize=(8, 3))  # Hauteur réduite ici
+    # === GRAPHIQUE
+    fig, ax = plt.subplots(figsize=(8, 3))
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.get_tk_widget().pack()
 
@@ -119,20 +134,41 @@ def start_ui():
                 ax.set_ylabel("Prix ($)")
                 ax.grid(True)
                 ax.legend()
-                # Affichage uniquement des années
-                ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
+                ax.xaxis.set_major_locator(plt.MaxNLocator(8))
                 fig.autofmt_xdate()
                 canvas.draw()
 
     symbol_menu.bind("<<ComboboxSelected>>", plot_selected_symbol)
 
     # === TABLEAU DU PORTEFEUILLE
+    style = ttk.Style()
+    style.configure("Treeview", rowheight=25)
+    style.map('Treeview', background=[('selected', '#007BFF')])
+    style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
+
     table = ttk.Treeview(root, columns=("Symbole", "Quantité", "Dernier prix", "Valeur totale"), show="headings")
     for col in table["columns"]:
         table.heading(col, text=col)
-        table.column(col, anchor="center")
+        table.column(col, anchor="center", width=150)
     table.pack(fill="x", padx=20, pady=10)
 
+    # === SUPPRESSION ACTIF
+    def remove_selected():
+        selected = table.selection()
+        if not selected:
+            messagebox.showinfo("Info", "Sélectionnez un actif à supprimer.")
+            return
+        values = table.item(selected[0])["values"]
+        symbol = values[0]
+        if symbol in portfolio:
+            del portfolio[symbol]
+            save_portfolio()
+            update_symbol_list()
+            update_portfolio_table()
+
+    tk.Button(root, text="Supprimer l'actif sélectionné", command=remove_selected, bg="#dc3545", fg="white").pack(pady=5)
+
+    # === TOTAL PORTEFEUILLE
     portfolio_total_var = tk.StringVar(value="Total portefeuille : 0.00 $")
     tk.Label(root, textvariable=portfolio_total_var, font=("Arial", 12, "bold"), bg="#f0f0f0").pack(pady=5)
 
@@ -144,18 +180,28 @@ def start_ui():
             table.delete(row)
 
         total = 0.0
-
-        for symbol, data in portfolio.items():
+        for idx, (symbol, data) in enumerate(portfolio.items()):
             qty = data["quantity"]
             last_price = data["last_price"]
             total_value = round(qty * last_price, 2)
             total += total_value
-            table.insert("", "end", values=(symbol, qty, f"{last_price:.2f} $", f"{total_value:.2f} $"))
+            table.insert("", "end", values=(
+                symbol,
+                qty,
+                f"{last_price:.2f} $",
+                f"{total_value:.2f} $"
+            ), tags=("oddrow" if idx % 2 == 0 else "evenrow"))
+
+        table.tag_configure("oddrow", background="#ffffff")
+        table.tag_configure("evenrow", background="#e9e9e9")
 
         portfolio_total_var.set(f"Total portefeuille : {total:.2f} $")
 
+    update_symbol_list()
+    update_portfolio_table()
+
     root.mainloop()
 
-# === LANCEMENT
+# === DÉMARRAGE
 if __name__ == "__main__":
     start_ui()
