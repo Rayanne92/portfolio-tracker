@@ -2,5 +2,9 @@
   "TSLA": {
     "quantity": 1,
     "last_price": 343.82
+  },
+  "AAPL": {
+    "quantity": 100,
+    "last_price": 202.09
   }
 }
